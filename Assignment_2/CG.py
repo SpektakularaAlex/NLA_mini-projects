@@ -11,12 +11,13 @@ image = image.resize((new_size, new_size))
 im = np.asarray(image, dtype=float) / 255.0
 org_im = im
 
-plt.imshow(im, cmap="gray")
-plt.title(f"Original Image")
-plt.show()
+# plt.imshow(im, cmap="gray")
+# plt.title(f"Original Image")
+# plt.show()
 
 
-epsilon = 0.5
+epsilon = 1e-8
+# epsilon = 1e-8
 
 
 # print(f"im_before = {im}")
@@ -66,7 +67,7 @@ def build_A(d, beta, c):
     return A
 
 
-beta = 10000
+beta = 100000
 c = 1
 lamb = 0.5
 sigma = 1e-5
@@ -100,16 +101,18 @@ print(f"nnz A = {(count_nonzero_entries(A)/100)*np.size(A)}")
 e = sigma*np.random.normal(0, 1, size=(np.shape(im)))
 b = A@im@(A.T) + e
 
-plt.imshow(b, cmap="gray")
-plt.title(f"Observed blurry and noisy image b")
-plt.show()
+blurred_im = b
+
+# plt.imshow(b, cmap="gray")
+# plt.title(f"Observed blurry and noisy image b")
+# plt.show()
 
 
-b_filtered = filter_epsilon(b, 0.001)
+b_filtered = filter_epsilon(b, epsilon)
 # plt.imshow(b_filtered, cmap="gray")
 # plt.show()
 
-A_trunc = filter_epsilon(A, 1e-8)
+A_trunc = filter_epsilon(A, epsilon)
 A_sp = sp.csr_matrix(A_trunc)
 
 
@@ -117,7 +120,7 @@ A_sp = sp.csr_matrix(A_trunc)
 L1 = (np.eye(d) - np.eye(d, k=1))[:-1, :]
 # L2 = (np.eye(d) - np.eye(d, k=1))[:-1, :]
 
-L1_trunc = filter_epsilon(L1, 1e-8)
+L1_trunc = filter_epsilon(L1, epsilon)
 # L2_trunc = filter_epsilon(L2, 1e-8)
 
 L1_sp = sp.csr_matrix(L1_trunc)
@@ -196,6 +199,8 @@ def CG_mine(A_sparse, L_G_sparse, b_signal, lamb, x0, tol=1e-3, max_iter=10):
 
     return x_new.reshape(d, d), False, it_counter, np.linalg.norm(r_m1) / np.linalg.norm(c)
 
+
+
 # lam = 10**(-4)
 
 # x_pic_recovered_maybe, TF, it_count, relative_res = CG_mine(A_sp, L_G_sp, b, lam, np.zeros(300*300), 1e-15, 1000)
@@ -209,33 +214,164 @@ def CG_mine(A_sparse, L_G_sparse, b_signal, lamb, x0, tol=1e-3, max_iter=10):
 # plt.title(f"Reconstructed Image x")
 # plt.show()
 
+def J(x): #Objectvive function scoring a candidate image x
+    x_vect = x.ravel()
+    print(f"x raveled has shape:{np.shape(x_vect)}")
+    return ((np.linalg.norm(A_sp@x - b))**2) + (lamb**2)* ((np.linalg.norm(L_G_sp@x_vect))**2)
+
 def CG_over_lam(lam_list, origingal_im):
     X_rel_error_list =[]
     Rel_res_list = []
+    J_list = []
     for i in lam_list:
         X, converged, its, rel_res = CG_mine(A, L_G_sp, b, i, np.zeros(d*d), 1e-6, 500)
         # X_min_im_nomred_list.append(np.linalg.norm(X - origingal_im) / np.linalg.norm(origingal_im))
         rel_err = np.linalg.norm(X - origingal_im) / np.linalg.norm(origingal_im)
-        print(f"lam={i}  rel_err={rel_err:.4f}  converged={converged}  its={its}")
+        obj_fun_score = J(X)
+        print(f"lam={i}  rel_err={rel_err:.4f} objective_fun_score={obj_fun_score}  converged={converged}  its={its}")
         X_rel_error_list.append(rel_err)
         Rel_res_list.append(rel_res)
+        J_list.append(obj_fun_score)
 
         # plt.imshow(X, cmap="gray")
         # plt.title(f"Reconstructed Image x with lamb={i} and relative error={rel_err}")
         # plt.show()
-    plt.plot(lam_list, X_rel_error_list)
-    plt.xlabel("Lambda")
-    plt.ylabel("Relative error")
-    plt.title(f"Relative error over lambda")
+    fig, axs = plt.subplots(1, 3, figsize=(15, 4))
+
+    axs[0].plot(lam_list, X_rel_error_list)
+    axs[0].set_xlabel("Lambda")
+    axs[0].set_ylabel("Relative error")
+    axs[0].set_title("Relative error over lambda")
+    axs[0].set_yscale("log")
+    axs[0].set_xscale("log")
+
+    axs[1].plot(lam_list, Rel_res_list)
+    axs[1].set_xlabel("Lambda")
+    axs[1].set_ylabel("Relative residual")
+    axs[1].set_title("Relative residual over lambda")
+    axs[1].set_yscale("log")
+    axs[1].set_xscale("log")
+
+    axs[2].plot(lam_list, J_list)
+    axs[2].set_xlabel("Lambda")
+    axs[2].set_ylabel("J(x)")
+    axs[2].set_title("Objective function score over lambda")
+    axs[2].set_yscale("log")
+    axs[2].set_xscale("log")
+
+    fig.tight_layout()
     plt.show()
-    
-    plt.plot(lam_list, Rel_res_list)
-    plt.xlabel("Lambda")
-    plt.ylabel("Relative residual")
-    plt.title(f"Relative residual over lambda")
+
+def CG_over_it(A_sparse, L_G_sparse, b_signal, lamb, x0, tol, max_iter, origingal_im):
+
+    c = (A_sparse.T @ b_signal @ A_sparse).ravel()  
+    d = 300
+    x_old = x0
+    # x_old = x0.reshape(d, d)
+
+    r_m = c # Since we try for x0 = 0 first
+    p_m = r_m
+
+    it_counter = 0
+
+    it_list = np.linspace(1, max_iter, max_iter)
+
+    # print(f"p_m shape: {np.shape(p_m)}")
+    X_rel_error_list =[]
+    Rel_res_list = []
+    J_list = []
+    for i in range(max_iter):
+        P_m = p_m.reshape(d, d)
+        # M_pm = (A_sparse.T@(A_sparse@P_m)).ravel() + lamb * L_G_sparse.T @ (L_G_sparse @ p_m)
+        M_pm = (A_sparse.T @ (A_sparse @ P_m @ A_sparse.T) @ A_sparse).ravel() + lamb * (L_G_sparse.T @ (L_G_sparse @ p_m)) 
+        alph_m = (r_m.T @ r_m) / (p_m.T @ M_pm)
+
+        x_new = x_old + alph_m * p_m
+        r_m1 = r_m - alph_m*M_pm
+        rel_res = np.linalg.norm(r_m1) / np.linalg.norm(c)
+        # r_m1 = c - (A_sparse.T@(A_sparse@x_new) + lamb*L_G_sparse.T @ (L_G_sparse @ x_new))
+        
+        rel_err = np.linalg.norm(x_new.reshape(300, 300) - origingal_im) / np.linalg.norm(origingal_im)
+        obj_fun_score = J(x_new.reshape(300, 300))
+        print(f"iteration={i}  rel_err={rel_err:.4f} objective_fun_score={obj_fun_score}  rel_res={rel_res}")
+        X_rel_error_list.append(rel_err)
+        Rel_res_list.append(rel_res)
+        J_list.append(obj_fun_score)
+
+        if rel_res <= tol:
+            it_counter += 1
+            print(f"Converged at it={it_counter}")
+            # return x_new.reshape(d, d), True, rel_res
+            pass
+        
+        beta_m = (r_m1.T @ r_m1) / (r_m.T @ r_m)
+        p_m = r_m1 + beta_m * p_m
+        x_old = x_new
+        r_m = r_m1
+
+        it_counter += 1
+    fig, axs = plt.subplots(1, 3, figsize=(15, 4))
+
+    axs[0].plot(it_list, X_rel_error_list)
+    axs[0].set_xlabel("Iteration")
+    axs[0].set_ylabel("Relative error")
+    axs[0].set_title("Relative error over iteration")
+    axs[0].set_yscale("log")
+    axs[0].set_xscale("log")
+
+    axs[1].plot(it_list, Rel_res_list)
+    axs[1].set_xlabel("Iteration")
+    axs[1].set_ylabel("Relative residual")
+    axs[1].set_title("Relative residual over iteration")
+    axs[1].set_yscale("log")
+    axs[1].set_xscale("log")
+
+    axs[2].plot(it_list, J_list)
+    axs[2].set_xlabel("Iteration")
+    axs[2].set_ylabel("J(x)")
+    axs[2].set_title("Objective function score over iteration")
+    axs[2].set_yscale("log")
+    axs[2].set_xscale("log")
+
+    fig.tight_layout()
     plt.show()
+
+    # return x_new.reshape(d, d), False, it_counter, np.linalg.norm(r_m1) / np.linalg.norm(c)
+
 
 # lam_list = [1e-9, 1e-8, 1e-7, 1e-6, 1e-5, 1e-4, 1e-3, 1e-2, 1e-1, 0, 1, 10]
 # lam_list = np.linspace(1e-8, 5e-6, 10)
-lam_list = np.logspace(-14, -7, 10)
-CG_over_lam(lam_list, org_im)
+lam_list = np.logspace(-14, -4, 15)
+# CG_over_lam(lam_list, org_im)
+
+
+
+# lambd_try_optimise =2.7825594022071257e-09
+lambd_try_optimise = 1.6681005372000592e-08
+
+recon_im, TF, it_count, norm_res = CG_mine(A_sp, L_G_sp, b, lambd_try_optimise, np.zeros(300*300), tol=1e-3, max_iter=10)
+
+
+CG_over_it(A_sp, L_G_sp, b, lambd_try_optimise, np.zeros(300*300), 1e-3, 500, org_im)
+
+# print(f"Shape of x:{np.shape(recon_im)}")
+# print(f"Shape of A_sp:{np.shape(A_sp)}")
+# print(f"Shape of b:{np.shape(b)}")
+# print(f"Shape of L_G_sp:{np.shape(L_G_sp)}")
+
+# print(f"Trying J(x) with reconstructed image: J(x)={J(recon_im)}")
+
+def plot_images_all(original_image, blurred_image, reconstructed_image):
+    images = [original_image, blurred_image, reconstructed_image]
+    titles = ["Original Image", "Blurred Image", "Reconstructed Image"]
+
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    for ax, img, title in zip(axes, images, titles):
+        ax.imshow(img, cmap="gray")
+        ax.set_title(title)
+        ax.axis("off")
+
+    plt.tight_layout()
+    plt.show()
+
+plot_images_all(org_im, blurred_im, recon_im)
