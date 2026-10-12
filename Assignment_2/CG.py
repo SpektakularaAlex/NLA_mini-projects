@@ -66,12 +66,21 @@ def build_A(d, beta, c):
     A = h * c * np.exp(-beta * (s[:, None] - t[None, :])**2)   # (d, d)
     return A
 
-
-beta = 100000
+"<------------------ Variables and constants -------------------->"
+"<--------------------------------------------------------------->"
+# beta = 1000
+beta = 10**5
 c = 1
-lamb = 0.5
+lamb = 1e-3
+# lambd_try_optimise =2.7825594022071257e-09
+# lambd_try_optimise = 1.6681005372000592e-08
 sigma = 1e-5
 d = 300
+max_iter = 100
+tol = 1e-3
+
+"<--------------------------------------------------------------->"
+"<--------------------------------------------------------------->"
 
 A = build_A(d, beta, c)
 
@@ -179,7 +188,7 @@ def CG_mine(A_sparse, L_G_sparse, b_signal, lamb, x0, tol=1e-3, max_iter=10):
     for i in range(max_iter):
         P_m = p_m.reshape(d, d)
         # M_pm = (A_sparse.T@(A_sparse@P_m)).ravel() + lamb * L_G_sparse.T @ (L_G_sparse @ p_m)
-        M_pm = (A_sparse.T @ (A_sparse @ P_m @ A_sparse.T) @ A_sparse).ravel() + lamb * (L_G_sparse.T @ (L_G_sparse @ p_m)) 
+        M_pm = (A_sparse.T @ (A_sparse @ P_m @ A_sparse.T) @ A_sparse).ravel() + (lamb**2) * (L_G_sparse.T @ (L_G_sparse @ p_m)) 
         alph_m = (r_m.T @ r_m) / (p_m.T @ M_pm)
 
         x_new = x_old + alph_m * p_m
@@ -217,7 +226,7 @@ def CG_mine(A_sparse, L_G_sparse, b_signal, lamb, x0, tol=1e-3, max_iter=10):
 def J(x): #Objectvive function scoring a candidate image x
     x_vect = x.ravel()
     print(f"x raveled has shape:{np.shape(x_vect)}")
-    return ((np.linalg.norm(A_sp@x - b))**2) + (lamb**2)* ((np.linalg.norm(L_G_sp@x_vect))**2)
+    return ((np.linalg.norm(A_sp@x@A_sp.T - b))**2) + (lamb**2)* ((np.linalg.norm(L_G_sp@x_vect))**2)
 
 def CG_over_lam(lam_list, origingal_im):
     X_rel_error_list =[]
@@ -283,7 +292,7 @@ def CG_over_it(A_sparse, L_G_sparse, b_signal, lamb, x0, tol, max_iter, originga
     for i in range(max_iter):
         P_m = p_m.reshape(d, d)
         # M_pm = (A_sparse.T@(A_sparse@P_m)).ravel() + lamb * L_G_sparse.T @ (L_G_sparse @ p_m)
-        M_pm = (A_sparse.T @ (A_sparse @ P_m @ A_sparse.T) @ A_sparse).ravel() + lamb * (L_G_sparse.T @ (L_G_sparse @ p_m)) 
+        M_pm = (A_sparse.T @ (A_sparse @ P_m @ A_sparse.T) @ A_sparse).ravel() + (lamb**2) * (L_G_sparse.T @ (L_G_sparse @ p_m)) 
         alph_m = (r_m.T @ r_m) / (p_m.T @ M_pm)
 
         x_new = x_old + alph_m * p_m
@@ -346,13 +355,12 @@ lam_list = np.logspace(-14, -4, 15)
 
 
 
-# lambd_try_optimise =2.7825594022071257e-09
-lambd_try_optimise = 1.6681005372000592e-08
-
-recon_im, TF, it_count, norm_res = CG_mine(A_sp, L_G_sp, b, lambd_try_optimise, np.zeros(300*300), tol=1e-3, max_iter=10)
 
 
-CG_over_it(A_sp, L_G_sp, b, lambd_try_optimise, np.zeros(300*300), 1e-3, 500, org_im)
+recon_im, TF, it_count, norm_res = CG_mine(A_sp, L_G_sp, b, lamb, np.zeros(300*300), tol, max_iter)
+
+
+# CG_over_it(A_sp, L_G_sp, b, lambd_try_optimise, np.zeros(300*300), 1e-3, 500, org_im)
 
 # print(f"Shape of x:{np.shape(recon_im)}")
 # print(f"Shape of A_sp:{np.shape(A_sp)}")
@@ -374,4 +382,8 @@ def plot_images_all(original_image, blurred_image, reconstructed_image):
     plt.tight_layout()
     plt.show()
 
-plot_images_all(org_im, blurred_im, recon_im)
+
+
+
+if __name__ == "__main__":
+    plot_images_all(org_im, blurred_im, recon_im)
